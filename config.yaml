@@ -12,8 +12,8 @@ web_server:
 credentials:
   known_hosts_file: 'known_hosts_credentials.txt'
   generic_credentials_file: 'generic_credentials.txt'
-  ssh_private_key: '/path/to/your/private_ssh_key'
-  ssh_username: 'afonso.duarte'
+  ssh_private_key: 'id_rsa'
+  ssh_username: 'afonso'
 
 network_scan:
   subnets:

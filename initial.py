@@ -104,7 +104,7 @@ def scan_subnet(subnet, scan_arguments="-O --top-ports 100"):
                 # Classify the host based on OS detection results
                 if any(x in os_name for x in ['microsoft', 'windows']):
                     host_class = 'windows'
-                elif any(x in os_name for x in ['linux', 'macos', 'apple', 'bsd']):
+                elif any(x in os_name for x in ['linux']):
                     host_class = 'unix'
                 elif any(x in os_name for x in ['espressif', 'tasmota', 'nodemcu']):
                     host_class = 'iot'
@@ -179,35 +179,6 @@ def load_known_host_credentials(credentials_path='known_hosts_credentials.txt'):
             credentials[ip_address] = {'username': username, 'password': password}
     return credentials
 
-
-def ssh_run_netstat(host_ip, username, password):
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    try:
-        ssh.connect(host_ip, username=username, password=password)
-        stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
-        
-        # Read command output and errors
-        command_output = stdout.read().decode('utf-8')
-        command_error = stderr.read().decode('utf-8')
-
-        # Log the command output and errors
-        session_logger.info(f"Netstat output for {host_ip}:\n{command_output}")
-        if command_error:
-            session_logger.error(f"Netstat errors for {host_ip}:\n{command_error}")
-
-        # Parse and return the netstat output, handle None return in calling function
-        return parse_netstat_output(command_output)
-
-    except paramiko.AuthenticationException:
-        error_logger.error(f"Authentication failed for host {host_ip}.", exc_info=True)
-
-    except Exception as e:
-        error_logger.error(f"SSH connection or command execution failed for host {host_ip}: {e}", exc_info=True)
-
-    finally:
-        ssh.close()
 
 
 
@@ -288,15 +259,32 @@ def update_netstat_output(host_id, netstat_data):
                        VALUES (?, ?, ?, ?, ?)
                        ON CONFLICT(host_id, remote_host, remote_port) DO NOTHING""",
                     (host_id, remote_ip, remote_port, connection_type, local_port))
-
     conn.commit()
     conn.close()
 
+import socket
 
+def is_port_open(ip_address, port=22, timeout=3):
+    """
+    Check if a specific port is open on a host.
 
+    Parameters:
+    - ip_address: The IP address of the host to check.
+    - port: The port number to check. Default is 22 (SSH).
+    - timeout: Timeout in seconds for the connection attempt. Default is 3 seconds.
+
+    Returns:
+    - True if the port is open, False otherwise.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    result = sock.connect_ex((ip_address, port))
+    sock.close()
+    return result == 0  # Returns True if the port is open (connect_ex returns 0 for success)
 
 
 def process_unix_hosts():
+    config = load_config()  # Load the configuration to access the SSH private key path
     credentials = load_known_host_credentials()
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -304,20 +292,39 @@ def process_unix_hosts():
     cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='unix'")
     unix_hosts = cur.fetchall()
 
-    # Added console output for the number of Unix hosts found
     print(f"Found {len(unix_hosts)} Unix hosts in the database. Processing...")
 
+    all_netstat_outputs = []  # Collect netstat outputs for all hosts
+
     for host_id, ip_address in unix_hosts:
-        if ip_address in credentials:
-            cred = credentials[ip_address]
-            print(f"Attempting SSH to Unix host: {ip_address}")  # Added console output
-            #ssh_run_command(ip_address, cred['username'], cred['password'])
-            netstat_data = ssh_run_netstat(ip_address, cred['username'], cred['password'])
-            update_netstat_output(host_id, netstat_data)
-        else:
-            print(f"No credentials found for Unix host: {ip_address}")  # Added console output for missing credentials
+        if not is_port_open(ip_address):
+            print(f"Port 22 is closed on {ip_address}. Bypassing this host.")
+            continue  # Skip to the next host
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
+        try:
+            ssh.connect(ip_address, username=config['credentials']['ssh_username'], pkey=pkey)
+            print(f"SSH key login successful for: {ip_address}")
+            stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
+            command_output = stdout.read().decode('utf-8')
+            netstat_output = parse_netstat_output(command_output)
+            update_netstat_output(host_id,netstat_output)
+            all_netstat_outputs.append(netstat_output)  # Append the output for this host
+        except paramiko.ssh_exception.AuthenticationException:
+            print(f"SSH key login failed for: {ip_address}, attempting password login...")
+            if ip_address in credentials:
+                cred = credentials[ip_address]
+                print(f"Attempting SSH to Unix host with password: {ip_address}")
+                # Add logic for password-based connection and netstat execution
+            else:
+                print(f"No credentials found for Unix host: {ip_address}")
+        finally:
+            ssh.close()
 
     conn.close()
+    return all_netstat_outputs  # Return the collected outputs after processing all hosts
+
 
 
 
