@@ -284,8 +284,8 @@ def is_port_open(ip_address, port=22, timeout=3):
 
 
 def process_unix_hosts():
-    config = load_config()  # Load the configuration to access the SSH private key path
-    credentials = load_known_host_credentials()
+    config = load_config()  # Load the configuration
+    credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
@@ -300,31 +300,45 @@ def process_unix_hosts():
         if not is_port_open(ip_address):
             print(f"Port 22 is closed on {ip_address}. Bypassing this host.")
             continue  # Skip to the next host
+
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
-        try:
-            ssh.connect(ip_address, username=config['credentials']['ssh_username'], pkey=pkey)
-            print(f"SSH key login successful for: {ip_address}")
+        ssh_key_success = False
+
+        for username in config['credentials']['ssh_usernames']:
+            try:
+                pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
+                ssh.connect(ip_address, username=username, pkey=pkey)
+                print(f"SSH key login successful for: {ip_address} with username: {username}")
+                ssh_key_success = True
+                break  # Exit the username loop on successful connection
+            except paramiko.ssh_exception.AuthenticationException:
+                print(f"SSH key login failed for: {ip_address} with username: {username}")
+
+        if not ssh_key_success and ip_address in credentials:
+            cred = credentials[ip_address]
+            # Attempt password login if SSH key authentication fails
+            for username, password in credentials.items():
+                try:
+                    ssh.connect(ip_address, username=cred['username'], password=cred['password'])
+                    print(f"Password login successful for: {ip_address} with username: {cred['username']}")
+                    ssh_key_success = True
+                    break  # Exit the credentials loop on successful connection
+                except paramiko.ssh_exception.AuthenticationException:
+                    print(f"Password login failed for: {ip_address} with username: {cred['username']}")
+
+        if ssh_key_success:
+            # SSH operations like ssh_run_netstat
             stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
             command_output = stdout.read().decode('utf-8')
             netstat_output = parse_netstat_output(command_output)
-            update_netstat_output(host_id,netstat_output)
+            update_netstat_output(host_id, netstat_output)
             all_netstat_outputs.append(netstat_output)  # Append the output for this host
-        except paramiko.ssh_exception.AuthenticationException:
-            print(f"SSH key login failed for: {ip_address}, attempting password login...")
-            if ip_address in credentials:
-                cred = credentials[ip_address]
-                print(f"Attempting SSH to Unix host with password: {ip_address}")
-                # Add logic for password-based connection and netstat execution
-            else:
-                print(f"No credentials found for Unix host: {ip_address}")
-        finally:
-            ssh.close()
+
+        ssh.close()
 
     conn.close()
     return all_netstat_outputs  # Return the collected outputs after processing all hosts
-
 
 
 
@@ -490,16 +504,14 @@ def main(subnet=None):
     delete_duplicate_connections()
     print("Duplicate connections deleted.")
 
-    connections = fetch_connections()
 
     # Generate Mermaid diagram code based on the connections
+    connections = fetch_connections()
     mermaid_code = generate_mermaid_code(connections)
 
     # Output the Mermaid code to a Markdown file
     output_to_markdown(mermaid_code)
-
     print("Mermaid diagram generation complete.")
-
 
 
 if __name__ == '__main__':

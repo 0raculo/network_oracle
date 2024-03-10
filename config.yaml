@@ -13,10 +13,11 @@ credentials:
   known_hosts_file: 'known_hosts_credentials.txt'
   generic_credentials_file: 'generic_credentials.txt'
   ssh_private_key: 'id_rsa'
-  ssh_username: 'afonso'
+  ssh_usernames: ['afonso', 'root']
 
 network_scan:
   subnets:
+    - '192.168.67.0/30'
     - '192.168.69.0/24'
 
 logging:
