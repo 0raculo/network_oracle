@@ -1,0 +1,24 @@
+database:
+  path: 'network_dependencies.db'
+
+nmap:
+  options:
+    default: '-sn'
+    os_detection: '-O --top-ports 100'
+
+web_server:
+  host: '127.0.0.1'
+  port: 5000
+  debug: true
+
+credentials:
+  known_hosts_file: 'known_hosts_credentials.txt'
+  generic_credentials_file: 'generic_credentials.txt'
+
+network_scan:
+  subnets:
+    - '192.168.69.0/24'
+
+logging:
+  directory: 'logs'
+  filename_format: 'log_%Y%m%d_%H%M%S.txt'

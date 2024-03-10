@@ -1,0 +1,6 @@
+PyYAML
+paramiko
+python-nmap
+pywinrm
+sqlite3  # Usually included in Python's standard library
+
