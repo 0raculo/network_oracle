@@ -476,7 +476,7 @@ def main(subnet=None):
     # Process Unix hosts
     print("Processing Unix hosts...")
     process_unix_hosts()
-    print("Processing complete.")
+    print("Processing complete.") 
 
     # Delete duplicate connections from the database
     print("Deleting duplicate connections...")
