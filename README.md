@@ -1,8 +1,12 @@
-# Network Dependencies Discovery Tool
+# Network Oracle
+
+Network Dependencies Discovery Tool
 
 ## Overview
 
 This tool automates the discovery of network dependencies between hosts within specified subnets. It leverages netstat output parsed from each host to identify and log connections, categorizing them as either incoming or outgoing. The tool supports Linux and BSD systems and requires SSH access to remote hosts.
+
+ ![Network Oracle](/img/network_oracle.png)
 
 ## Requirements
 
