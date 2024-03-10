@@ -1,3 +1,4 @@
+import os
 import sys
 import re
 import sqlite3
@@ -10,12 +11,11 @@ from datetime import datetime
 import argparse
 
 # Setup command-line argument parsing
-parser = argparse.ArgumentParser(description='Network Mapper Script')
+parser = argparse.ArgumentParser(description='Network Oracle')
 parser.add_argument('subnet', nargs='?', help='Subnet to scan')
 parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
 args = parser.parse_args()
 
-import os
 
 # Create a log directory if it doesn't exist
 log_dir = 'log'
@@ -24,7 +24,6 @@ if not os.path.exists(log_dir):
 
 # Updated logging setup
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
 session_logger = logging.getLogger("session")
 session_handler = logging.FileHandler(f"{log_dir}/session_{timestamp}.log")
 session_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -89,10 +88,9 @@ def setup_database():
     conn.close()
 
 
-def scan_subnet(subnet):
+def scan_subnet(subnet, scan_arguments="-O --top-ports 100"):
     scanner = nmap.PortScanner()
-    # Perform a port scan along with OS detection
-    scanner.scan(hosts=subnet, arguments='-O --top-ports 100')  # Consider adjusting port scan options as needed
+    scanner.scan(hosts=subnet, arguments=scan_arguments)
     host_details = []
 
     for host in scanner.all_hosts():
@@ -452,6 +450,7 @@ def main(subnet=None):
     # Decide whether to use the provided subnet or the ones in the config
     subnets = [subnet] if subnet else config['network_scan']['subnets']
 
+
     # Fetch recent hosts to avoid rescanning, if no specific subnet is provided
     if not subnet:
         recent_hosts = get_recent_hosts()
@@ -464,11 +463,13 @@ def main(subnet=None):
     else:
         recent_hosts = []
 
+
+    scan_arguments = config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100")  # Default if not specified
     # Scan and process subnets if there are no recent hosts or a specific subnet is provided
     if not recent_hosts:
         for subnet in subnets:
             print(f"Scanning subnet: {subnet}")
-            discovered_hosts_info = scan_subnet(subnet)
+            discovered_hosts_info = scan_subnet(subnet, scan_arguments)
             discovered_hosts = populate_hosts(discovered_hosts_info)
             print(f"Discovered and added {len(discovered_hosts)} hosts from the subnet {subnet} to the database.")
 
