@@ -11,11 +11,6 @@ from datetime import datetime
 import argparse
 
 # Setup command-line argument parsing
-parser = argparse.ArgumentParser(description='Network Oracle')
-parser.add_argument('subnet', nargs='?', help='Subnet to scan')
-parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
-args = parser.parse_args()
-
 
 # Create a log directory if it doesn't exist
 log_dir = 'log'
@@ -37,10 +32,6 @@ error_formatter = logging.Formatter('%(asctime)s - %(levelname)s - ERROR - %(mes
 error_handler.setFormatter(error_formatter)
 error_logger.addHandler(error_handler)
 error_logger.setLevel(logging.ERROR)
-
-if args.verbose:
-    session_logger.setLevel(logging.DEBUG)
-
 
 
 DB_PATH = 'network_dependencies.db'  # Path to your SQLite database
@@ -88,12 +79,19 @@ def setup_database():
     conn.close()
 
 
-def scan_subnet(subnet, scan_arguments="-O --top-ports 100"):
+def scan_subnet(subnet, scan_arguments="-O --top-ports 100", excluded_hosts=None):
     scanner = nmap.PortScanner()
     scanner.scan(hosts=subnet, arguments=scan_arguments)
     host_details = []
 
+    if excluded_hosts is None:
+        excluded_hosts = set()
+
     for host in scanner.all_hosts():
+        if host in excluded_hosts:
+            print(f"Skipping excluded host: {host}")
+            continue  # Skip this host and move on to the next one
+
         os_type = 'unknown'
         host_class = 'other'  # Default classification
 
@@ -116,6 +114,7 @@ def scan_subnet(subnet, scan_arguments="-O --top-ports 100"):
         host_details.append((host, os_type, host_class))
 
     return host_details
+
 
 
 def populate_hosts(hosts):
@@ -461,16 +460,36 @@ def output_to_markdown(mermaid_code):
 
 
 def main(subnet=None):
-    config = load_config()
+    parser = argparse.ArgumentParser(description='Network Oracle')
+    parser.add_argument('--subnet', help='Subnet to scan and update in the database', type=str)
+    parser.add_argument('--exclude', nargs='+', help='List of hosts to exclude from the scan', default=[], dest='exclude')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    args = parser.parse_args()
 
+    config = load_config()
     global DB_PATH
     DB_PATH = config['database']['path']
-
     setup_database()
 
-    # Decide whether to use the provided subnet or the ones in the config
-    subnets = [subnet] if subnet else config['network_scan']['subnets']
+    excluded_hosts = set(args.exclude)  # Initialize excluded_hosts with values from --exclude
 
+    if args.verbose:
+        session_logger.setLevel(logging.DEBUG)
+
+    # Determine which subnet(s) to scan
+    if args.subnet:
+        # Only scan the provided subnet
+        subnets_to_scan = [args.subnet]
+    else:
+        # Fall back to subnets from the configuration file
+        subnets_to_scan = config['network_scan']['subnets']
+        print("No specific subnet provided. Using subnets from the configuration file.")
+
+    # Scan the determined subnet(s)
+    for subnet in subnets_to_scan:
+        print(f"Scanning subnet: {subnet}")
+        discovered_hosts_info = scan_subnet(subnet, config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100"), excluded_hosts=excluded_hosts)
+        populate_hosts(discovered_hosts_info)
 
     # Fetch recent hosts to avoid rescanning, if no specific subnet is provided
     if not subnet:
@@ -483,16 +502,6 @@ def main(subnet=None):
             print("No recent hosts found in the database. Proceeding with subnet scanning.")
     else:
         recent_hosts = []
-
-
-    scan_arguments = config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100")  # Default if not specified
-    # Scan and process subnets if there are no recent hosts or a specific subnet is provided
-    if not recent_hosts:
-        for subnet in subnets:
-            print(f"Scanning subnet: {subnet}")
-            discovered_hosts_info = scan_subnet(subnet, scan_arguments)
-            discovered_hosts = populate_hosts(discovered_hosts_info)
-            print(f"Discovered and added {len(discovered_hosts)} hosts from the subnet {subnet} to the database.")
 
     # Process Unix hosts
     print("Processing Unix hosts...")
