@@ -9,6 +9,7 @@ import yaml
 import logging
 from datetime import datetime
 import argparse
+import socket
 
 # Setup command-line argument parsing
 
@@ -79,8 +80,9 @@ def setup_database():
     conn.close()
 
 
-def scan_subnet(subnet, scan_arguments="-O --top-ports 100", excluded_hosts=None):
+def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
     scanner = nmap.PortScanner()
+    print(f"Starting nmap scan on subnet: {subnet} with arguments: {scan_arguments}")
     scanner.scan(hosts=subnet, arguments=scan_arguments)
     host_details = []
 
@@ -92,28 +94,32 @@ def scan_subnet(subnet, scan_arguments="-O --top-ports 100", excluded_hosts=None
             print(f"Skipping excluded host: {host}")
             continue  # Skip this host and move on to the next one
 
+        print(f"Processing host: {host}")
         os_type = 'unknown'
         host_class = 'other'  # Default classification
 
-        if 'osmatch' in scanner[host]:
-            for osmatch in scanner[host]['osmatch']:
-                os_name = osmatch['name'].lower()
-
-                # Classify the host based on OS detection results
-                if any(x in os_name for x in ['microsoft', 'windows']):
-                    host_class = 'windows'
-                elif any(x in os_name for x in ['linux']):
-                    host_class = 'unix'
-                elif any(x in os_name for x in ['espressif', 'tasmota', 'nodemcu']):
-                    host_class = 'iot'
-
-                # Assume the first OS match is the most accurate
-                os_type = osmatch['name']
-                break
+        # Attempt to detect SSH banner
+        try:
+            print(f"Attempting to detect SSH banner on {host}")
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(5)
+                sock.connect((host, 22))
+                banner = sock.recv(1024).decode('utf-8', 'ignore')
+                if 'SSH' in banner:
+                    print(f"SSH banner detected on {host}")
+                    host_class = 'linux'  # SSH banner present, classify as Linux
+                else:
+                    print(f"No SSH banner detected on {host}")
+        except Exception as e:
+            print(f"Failed to detect SSH banner on {host}: {e}")
 
         host_details.append((host, os_type, host_class))
 
     return host_details
+
+
+# Note: Make sure to replace 'default_username' and 'default_password' with actual default SSH credentials or handle them according to your security policies.
+
 
 
 
@@ -261,7 +267,6 @@ def update_netstat_output(host_id, netstat_data):
     conn.commit()
     conn.close()
 
-import socket
 
 def is_port_open(ip_address, port=22, timeout=3):
     """
@@ -282,20 +287,20 @@ def is_port_open(ip_address, port=22, timeout=3):
     return result == 0  # Returns True if the port is open (connect_ex returns 0 for success)
 
 
-def process_unix_hosts():
+def process_linux_hosts():
     config = load_config()  # Load the configuration
     credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='unix'")
-    unix_hosts = cur.fetchall()
+    cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='linux'")
+    linux_hosts = cur.fetchall()
 
-    print(f"Found {len(unix_hosts)} Unix hosts in the database. Processing...")
+    print(f"Found {len(linux_hosts)} linux hosts in the database. Processing...")
 
     all_netstat_outputs = []  # Collect netstat outputs for all hosts
 
-    for host_id, ip_address in unix_hosts:
+    for host_id, ip_address in linux_hosts:
         if not is_port_open(ip_address):
             print(f"Port 22 is closed on {ip_address}. Bypassing this host.")
             continue  # Skip to the next host
@@ -503,9 +508,9 @@ def main(subnet=None):
     else:
         recent_hosts = []
 
-    # Process Unix hosts
-    print("Processing Unix hosts...")
-    process_unix_hosts()
+    # Process linux hosts
+    print("Processing linux hosts...")
+    process_linux_hosts()
     print("Processing complete.") 
 
     # Delete duplicate connections from the database
