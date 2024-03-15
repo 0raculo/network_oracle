@@ -465,7 +465,7 @@ def output_to_markdown(mermaid_code):
 
 
 def main(subnet=None):
-    parser = argparse.ArgumentParser(description='Network Oracle')
+    parser = argparse.ArgumentParser(description='Network Oracle v.1.0')
     parser.add_argument('--subnet', help='Subnet to scan and update in the database', type=str)
     parser.add_argument('--exclude', nargs='+', help='List of hosts to exclude from the scan', default=[], dest='exclude')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
