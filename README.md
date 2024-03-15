@@ -52,15 +52,15 @@ Create a config.yaml file in the same directory as the script with the following
 
 ## SSH Keys and Password Files
 
-- Linux Hosts: Store SSH private keys at the location specified in config.yaml.
-- Windows Hosts: Provide a plaintext file with credentials formatted as ip_address:username:password per line.
+- Linux Hosts: Store SSH private keys at the location specified in config.yaml, or using a known_hosts_credentials.txt file configured as ip_address:username:password per line
+- Windows Hosts: using winRM - TBD.
 
 ## Usage
 
 Run the script with Python, optionally specifying a subnet to scan:
 
 
-`python initial.py [subnet]`
+`python network_oracle.py [subnet]`
 
 If no subnet is provided, the script scans the subnets listed in config.yaml.
 
