@@ -2,9 +2,7 @@ database:
   path: 'network_dependencies.db'
 
 nmap:
-  options:
-    default: '-sn'
-    os_detection: '-O --top-ports 100'
+  scan_arguments: "-sn"
 
 web_server:
   host: '127.0.0.1'
@@ -14,9 +12,12 @@ web_server:
 credentials:
   known_hosts_file: 'known_hosts_credentials.txt'
   generic_credentials_file: 'generic_credentials.txt'
+  ssh_private_key: 'id_rsa'
+  ssh_usernames: ['afonso', 'root']
 
 network_scan:
   subnets:
+    - '192.168.67.0/30'
     - '192.168.69.0/24'
 
 logging:

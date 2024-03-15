@@ -1,3 +1,4 @@
+import os
 import sys
 import re
 import sqlite3
@@ -8,14 +9,9 @@ import yaml
 import logging
 from datetime import datetime
 import argparse
+import socket
 
 # Setup command-line argument parsing
-parser = argparse.ArgumentParser(description='Network Mapper Script')
-parser.add_argument('subnet', nargs='?', help='Subnet to scan')
-parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
-args = parser.parse_args()
-
-import os
 
 # Create a log directory if it doesn't exist
 log_dir = 'log'
@@ -24,7 +20,6 @@ if not os.path.exists(log_dir):
 
 # Updated logging setup
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
 session_logger = logging.getLogger("session")
 session_handler = logging.FileHandler(f"{log_dir}/session_{timestamp}.log")
 session_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -38,10 +33,6 @@ error_formatter = logging.Formatter('%(asctime)s - %(levelname)s - ERROR - %(mes
 error_handler.setFormatter(error_formatter)
 error_logger.addHandler(error_handler)
 error_logger.setLevel(logging.ERROR)
-
-if args.verbose:
-    session_logger.setLevel(logging.DEBUG)
-
 
 
 DB_PATH = 'network_dependencies.db'  # Path to your SQLite database
@@ -89,35 +80,47 @@ def setup_database():
     conn.close()
 
 
-def scan_subnet(subnet):
+def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
     scanner = nmap.PortScanner()
-    # Perform a port scan along with OS detection
-    scanner.scan(hosts=subnet, arguments='-O --top-ports 100')  # Consider adjusting port scan options as needed
+    print(f"Starting nmap scan on subnet: {subnet} with arguments: {scan_arguments}")
+    scanner.scan(hosts=subnet, arguments=scan_arguments)
     host_details = []
 
+    if excluded_hosts is None:
+        excluded_hosts = set()
+
     for host in scanner.all_hosts():
+        if host in excluded_hosts:
+            print(f"Skipping excluded host: {host}")
+            continue  # Skip this host and move on to the next one
+
+        print(f"Processing host: {host}")
         os_type = 'unknown'
         host_class = 'other'  # Default classification
 
-        if 'osmatch' in scanner[host]:
-            for osmatch in scanner[host]['osmatch']:
-                os_name = osmatch['name'].lower()
-
-                # Classify the host based on OS detection results
-                if any(x in os_name for x in ['microsoft', 'windows']):
-                    host_class = 'windows'
-                elif any(x in os_name for x in ['linux', 'macos', 'apple', 'bsd']):
-                    host_class = 'unix'
-                elif any(x in os_name for x in ['espressif', 'tasmota', 'nodemcu']):
-                    host_class = 'iot'
-
-                # Assume the first OS match is the most accurate
-                os_type = osmatch['name']
-                break
+        # Attempt to detect SSH banner
+        try:
+            print(f"Attempting to detect SSH banner on {host}")
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(5)
+                sock.connect((host, 22))
+                banner = sock.recv(1024).decode('utf-8', 'ignore')
+                if 'SSH' in banner:
+                    print(f"SSH banner detected on {host}")
+                    host_class = 'linux'  # SSH banner present, classify as Linux
+                else:
+                    print(f"No SSH banner detected on {host}")
+        except Exception as e:
+            print(f"Failed to detect SSH banner on {host}: {e}")
 
         host_details.append((host, os_type, host_class))
 
     return host_details
+
+
+# Note: Make sure to replace 'default_username' and 'default_password' with actual default SSH credentials or handle them according to your security policies.
+
+
 
 
 def populate_hosts(hosts):
@@ -181,35 +184,6 @@ def load_known_host_credentials(credentials_path='known_hosts_credentials.txt'):
             credentials[ip_address] = {'username': username, 'password': password}
     return credentials
 
-
-def ssh_run_netstat(host_ip, username, password):
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    try:
-        ssh.connect(host_ip, username=username, password=password)
-        stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
-        
-        # Read command output and errors
-        command_output = stdout.read().decode('utf-8')
-        command_error = stderr.read().decode('utf-8')
-
-        # Log the command output and errors
-        session_logger.info(f"Netstat output for {host_ip}:\n{command_output}")
-        if command_error:
-            session_logger.error(f"Netstat errors for {host_ip}:\n{command_error}")
-
-        # Parse and return the netstat output, handle None return in calling function
-        return parse_netstat_output(command_output)
-
-    except paramiko.AuthenticationException:
-        error_logger.error(f"Authentication failed for host {host_ip}.", exc_info=True)
-
-    except Exception as e:
-        error_logger.error(f"SSH connection or command execution failed for host {host_ip}: {e}", exc_info=True)
-
-    finally:
-        ssh.close()
 
 
 
@@ -290,36 +264,85 @@ def update_netstat_output(host_id, netstat_data):
                        VALUES (?, ?, ?, ?, ?)
                        ON CONFLICT(host_id, remote_host, remote_port) DO NOTHING""",
                     (host_id, remote_ip, remote_port, connection_type, local_port))
-
     conn.commit()
     conn.close()
 
 
+def is_port_open(ip_address, port=22, timeout=3):
+    """
+    Check if a specific port is open on a host.
+
+    Parameters:
+    - ip_address: The IP address of the host to check.
+    - port: The port number to check. Default is 22 (SSH).
+    - timeout: Timeout in seconds for the connection attempt. Default is 3 seconds.
+
+    Returns:
+    - True if the port is open, False otherwise.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    result = sock.connect_ex((ip_address, port))
+    sock.close()
+    return result == 0  # Returns True if the port is open (connect_ex returns 0 for success)
 
 
-
-def process_unix_hosts():
-    credentials = load_known_host_credentials()
+def process_linux_hosts():
+    config = load_config()  # Load the configuration
+    credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='unix'")
-    unix_hosts = cur.fetchall()
+    cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='linux'")
+    linux_hosts = cur.fetchall()
 
-    # Added console output for the number of Unix hosts found
-    print(f"Found {len(unix_hosts)} Unix hosts in the database. Processing...")
+    print(f"Found {len(linux_hosts)} linux hosts in the database. Processing...")
 
-    for host_id, ip_address in unix_hosts:
-        if ip_address in credentials:
+    all_netstat_outputs = []  # Collect netstat outputs for all hosts
+
+    for host_id, ip_address in linux_hosts:
+        if not is_port_open(ip_address):
+            print(f"Port 22 is closed on {ip_address}. Bypassing this host.")
+            continue  # Skip to the next host
+
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh_key_success = False
+
+        for username in config['credentials']['ssh_usernames']:
+            try:
+                pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
+                ssh.connect(ip_address, username=username, pkey=pkey)
+                print(f"SSH key login successful for: {ip_address} with username: {username}")
+                ssh_key_success = True
+                break  # Exit the username loop on successful connection
+            except paramiko.ssh_exception.AuthenticationException:
+                print(f"SSH key login failed for: {ip_address} with username: {username}")
+
+        if not ssh_key_success and ip_address in credentials:
             cred = credentials[ip_address]
-            print(f"Attempting SSH to Unix host: {ip_address}")  # Added console output
-            #ssh_run_command(ip_address, cred['username'], cred['password'])
-            netstat_data = ssh_run_netstat(ip_address, cred['username'], cred['password'])
-            update_netstat_output(host_id, netstat_data)
-        else:
-            print(f"No credentials found for Unix host: {ip_address}")  # Added console output for missing credentials
+            # Attempt password login if SSH key authentication fails
+            for username, password in credentials.items():
+                try:
+                    ssh.connect(ip_address, username=cred['username'], password=cred['password'])
+                    print(f"Password login successful for: {ip_address} with username: {cred['username']}")
+                    ssh_key_success = True
+                    break  # Exit the credentials loop on successful connection
+                except paramiko.ssh_exception.AuthenticationException:
+                    print(f"Password login failed for: {ip_address} with username: {cred['username']}")
+
+        if ssh_key_success:
+            # SSH operations like ssh_run_netstat
+            stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
+            command_output = stdout.read().decode('utf-8')
+            netstat_output = parse_netstat_output(command_output)
+            update_netstat_output(host_id, netstat_output)
+            all_netstat_outputs.append(netstat_output)  # Append the output for this host
+
+        ssh.close()
 
     conn.close()
+    return all_netstat_outputs  # Return the collected outputs after processing all hosts
 
 
 
@@ -442,15 +465,36 @@ def output_to_markdown(mermaid_code):
 
 
 def main(subnet=None):
-    config = load_config()
+    parser = argparse.ArgumentParser(description='Network Oracle')
+    parser.add_argument('--subnet', help='Subnet to scan and update in the database', type=str)
+    parser.add_argument('--exclude', nargs='+', help='List of hosts to exclude from the scan', default=[], dest='exclude')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    args = parser.parse_args()
 
+    config = load_config()
     global DB_PATH
     DB_PATH = config['database']['path']
-
     setup_database()
 
-    # Decide whether to use the provided subnet or the ones in the config
-    subnets = [subnet] if subnet else config['network_scan']['subnets']
+    excluded_hosts = set(args.exclude)  # Initialize excluded_hosts with values from --exclude
+
+    if args.verbose:
+        session_logger.setLevel(logging.DEBUG)
+
+    # Determine which subnet(s) to scan
+    if args.subnet:
+        # Only scan the provided subnet
+        subnets_to_scan = [args.subnet]
+    else:
+        # Fall back to subnets from the configuration file
+        subnets_to_scan = config['network_scan']['subnets']
+        print("No specific subnet provided. Using subnets from the configuration file.")
+
+    # Scan the determined subnet(s)
+    for subnet in subnets_to_scan:
+        print(f"Scanning subnet: {subnet}")
+        discovered_hosts_info = scan_subnet(subnet, config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100"), excluded_hosts=excluded_hosts)
+        populate_hosts(discovered_hosts_info)
 
     # Fetch recent hosts to avoid rescanning, if no specific subnet is provided
     if not subnet:
@@ -464,34 +508,24 @@ def main(subnet=None):
     else:
         recent_hosts = []
 
-    # Scan and process subnets if there are no recent hosts or a specific subnet is provided
-    if not recent_hosts:
-        for subnet in subnets:
-            print(f"Scanning subnet: {subnet}")
-            discovered_hosts_info = scan_subnet(subnet)
-            discovered_hosts = populate_hosts(discovered_hosts_info)
-            print(f"Discovered and added {len(discovered_hosts)} hosts from the subnet {subnet} to the database.")
-
-    # Process Unix hosts
-    print("Processing Unix hosts...")
-    process_unix_hosts()
-    print("Processing complete.")
+    # Process linux hosts
+    print("Processing linux hosts...")
+    process_linux_hosts()
+    print("Processing complete.") 
 
     # Delete duplicate connections from the database
     print("Deleting duplicate connections...")
     delete_duplicate_connections()
     print("Duplicate connections deleted.")
 
-    connections = fetch_connections()
 
     # Generate Mermaid diagram code based on the connections
+    connections = fetch_connections()
     mermaid_code = generate_mermaid_code(connections)
 
     # Output the Mermaid code to a Markdown file
     output_to_markdown(mermaid_code)
-
     print("Mermaid diagram generation complete.")
-
 
 
 if __name__ == '__main__':

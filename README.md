@@ -15,6 +15,11 @@ This tool automates the discovery of network dependencies between hosts within s
 - SSH Access: The script requires SSH access to remote hosts. Ensure SSH keys are set up or passwords are available.
 - SQLite Database: The script uses an SQLite database to store discovered connections.
 
+## Mermaid Diagram Generation
+
+After processing, the script generates a Mermaid diagram representing network connections, outputting to diagram_%date%.md. This diagram visualizes hosts, connections, and involved ports.
+
+![Network Oracle](/img/mermaid_diagram.png)
 
 ## Setup
 
@@ -59,6 +64,3 @@ Run the script with Python, optionally specifying a subnet to scan:
 
 If no subnet is provided, the script scans the subnets listed in config.yaml.
 
-## Mermaid Diagram Generation
-
-After processing, the script generates a Mermaid diagram representing network connections, outputting to diagram_%date%.md. This diagram visualizes hosts, connections, and involved ports.
