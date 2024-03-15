@@ -2,7 +2,7 @@ database:
   path: 'network_dependencies.db'
 
 nmap:
-  scan_arguments: "-O --top-ports 100"
+  scan_arguments: "-sn"
 
 web_server:
   host: '127.0.0.1'
