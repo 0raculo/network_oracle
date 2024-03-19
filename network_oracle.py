@@ -2,10 +2,9 @@ import os
 import sys
 import logging
 import nmap
-from datetime import datetime, timedelta
+from datetime import datetime
 import paramiko
 import yaml
-import sqlite3
 import argparse
 import socket
 
@@ -179,11 +178,7 @@ def is_port_open(ip_address, port=22, timeout=3):
 def process_linux_hosts():
     config = load_config()  # Load the configuration
     credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='linux'")
-    linux_hosts = cur.fetchall()
+    linux_hosts = db_manager.get_linux_hosts(config['database']['path'])
 
     print(f"Found {len(linux_hosts)} linux hosts in the database. Processing...")
 
@@ -230,7 +225,6 @@ def process_linux_hosts():
 
         ssh.close()
 
-    conn.close()
     return all_netstat_outputs  # Return the collected outputs after processing all hosts
 
 
@@ -303,37 +297,29 @@ def main(subnet=None):
     DB_PATH = config['database']['path']
     db_manager.setup_database()
 
-    excluded_hosts = set(args.exclude)  # Initialize excluded_hosts with values from --exclude
+    excluded_hosts = set(args.exclude)  # Initialize with values from --exclude
+    recent_host_ips = db_manager.get_recent_hosts(DB_PATH)  # Fetch recently scanned hosts
+
+    # Combine both sets to have a single set of hosts to exclude from scanning
+    excluded_hosts.update(recent_host_ips)
 
     if args.verbose:
         session_logger.setLevel(logging.DEBUG)
 
     # Determine which subnet(s) to scan
     if args.subnet:
-        # Only scan the provided subnet
         subnets_to_scan = [args.subnet]
     else:
-        # Fall back to subnets from the configuration file
         subnets_to_scan = config['network_scan']['subnets']
         print("No specific subnet provided. Using subnets from the configuration file.")
 
-    # Scan the determined subnet(s)
+    # Scan the determined subnet(s), skipping both manually excluded and recently scanned hosts
     for subnet in subnets_to_scan:
         print(f"Scanning subnet: {subnet}")
         discovered_hosts_info = scan_subnet(subnet, config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100"), excluded_hosts=excluded_hosts)
         db_manager.populate_hosts(discovered_hosts_info)
 
-    # Fetch recent hosts to avoid rescanning, if no specific subnet is provided
-    if not subnet:
-        recent_hosts = db_manager.get_recent_hosts()
-        if recent_hosts:
-            print(f"Using {len(recent_hosts)} recently discovered hosts from the database.")
-            for host in recent_hosts:
-                print(f"Recently discovered host: {host[1]}")
-        else:
-            print("No recent hosts found in the database. Proceeding with subnet scanning.")
-    else:
-        recent_hosts = []
+
 
     # Process linux hosts
     print("Processing linux hosts...")

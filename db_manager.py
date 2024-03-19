@@ -81,17 +81,18 @@ def populate_hosts(hosts):
     conn.close()
     return processed_hosts
 
-def get_recent_hosts(days=2):
+def get_recent_hosts(db_path, days=2):
     recent_threshold = datetime.now() - timedelta(days=days)
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("""SELECT ip_address FROM hosts
+                       WHERE last_discovery >= ?""", (recent_threshold.isoformat(),))
+        recent_hosts = {row[0] for row in cur.fetchall()}  # Use a set for efficient lookups
+        return recent_hosts
+    finally:
+        conn.close()
 
-    cur.execute("""SELECT ip_address, host_type, host_class FROM hosts
-                   WHERE last_discovery >= ?""", (recent_threshold.isoformat(),))
-    recent_hosts = cur.fetchall()
-
-    conn.close()
-    return recent_hosts
 
 def get_host_last_discovery(ip_address):
     conn = sqlite3.connect(DB_PATH)
@@ -179,3 +180,22 @@ def fetch_connections():
     connections = cur.fetchall()
     conn.close()
     return connections
+
+
+def get_linux_hosts(db_path):
+    """Fetches Linux hosts from the database.
+
+    Args:
+        db_path (str): Path to the SQLite database file.
+
+    Returns:
+        list: A list of tuples representing Linux hosts (id, ip_address).
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='linux'")
+        linux_hosts = cur.fetchall()
+        return linux_hosts
+    finally:
+        conn.close()
