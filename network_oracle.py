@@ -11,6 +11,7 @@ import socket
 ### helper files import
 import db_manager
 import processor_linux
+import graphs_lib
 from logger_config import setup_logging
 
 session_logger, error_logger = setup_logging()
@@ -65,29 +66,6 @@ def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
 
     return host_details
 
-def generate_mermaid_code(connections):
-    mermaid_code = "graph LR\n"
-    for _, host_ip, remote_host, local_port, remote_port, connection_type in connections:
-        if connection_type == 'incoming':
-            # Arrow points to the host for incoming connections
-            connection_line = f"{remote_host} --\"Port {local_port}\"--> {host_ip}"
-        else:  # 'outgoing'
-            # Arrow points from the host for outgoing connections
-            connection_line = f"{host_ip} --\"Port {remote_port}\"--> {remote_host}"
-
-        mermaid_code += f"    {connection_line}\n"
-
-    return mermaid_code
-
-def output_to_markdown(mermaid_code):
-    date_str = datetime.now().strftime("%Y%m%d")
-    filename = f"diagram_{date_str}.md"
-    with open(filename, 'w') as file:
-        file.write("```mermaid\n")
-        file.write(mermaid_code)
-        file.write("```\n")
-    print(f"Mermaid diagram code written to {filename}")
-
 
 def main(subnet=None):
     parser = argparse.ArgumentParser(description='Network Oracle v.1.0')
@@ -141,16 +119,12 @@ def main(subnet=None):
 
     # Generate Mermaid diagram code based on the connections
     connections = db_manager.fetch_connections()
-    mermaid_code = generate_mermaid_code(connections)
+    mermaid_code = graphs_lib.generate_mermaid_code(connections)
 
     # Output the Mermaid code to a Markdown file
-    output_to_markdown(mermaid_code)
+    graphs_lib.output_to_markdown(mermaid_code)
     print("Mermaid diagram generation complete.")
-
 
 if __name__ == '__main__':
     subnet_arg = sys.argv[1] if len(sys.argv) == 2 else None
     main(subnet_arg)
-
-
-
