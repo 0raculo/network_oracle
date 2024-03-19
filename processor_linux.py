@@ -6,6 +6,9 @@ from logger_config import setup_logging
 session_logger, error_logger = setup_logging()
 
 def ssh_run_command(host_ip, username, password, command="hostname"):
+    '''
+    Unused. Runs arbitrary command on a linux host.
+        '''
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 

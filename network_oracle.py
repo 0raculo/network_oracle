@@ -66,6 +66,19 @@ def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
 
     return host_details
 
+def cleanup():
+    # Delete duplicate connections from the database
+    print("Deleting duplicate connections...")
+    db_manager.delete_duplicate_connections()
+    print("Duplicate connections deleted.")
+
+    # Generate Mermaid diagram code based on the connections
+    # and output the Mermaid code to a Markdown file
+    connections = db_manager.fetch_connections()
+    mermaid_code = graphs_lib.generate_mermaid_code(connections)
+    graphs_lib.output_to_markdown(mermaid_code)
+    print("Mermaid diagram generation complete.")
+
 
 def main(subnet=None):
     parser = argparse.ArgumentParser(description='Network Oracle v.1.0')
@@ -73,7 +86,6 @@ def main(subnet=None):
     parser.add_argument('--exclude', nargs='+', help='List of hosts to exclude from the scan', default=[], dest='exclude')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     args = parser.parse_args()
-
     config = load_config()
     global DB_PATH
     DB_PATH = config['database']['path']
@@ -101,29 +113,16 @@ def main(subnet=None):
         discovered_hosts_info = scan_subnet(subnet, config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100"), excluded_hosts=excluded_hosts)
         db_manager.populate_hosts(discovered_hosts_info)
 
-    # Process linux hosts
+
+    # Process linux hosts  with the loaded config and credentials
     print("Processing linux hosts...")
     config = load_config()  # Your function to load the configuration
     credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])  # Your function to load credentials
-
-    # Now call process_linux_hosts with the loaded config and credentials
     all_netstat_outputs = processor_linux.ssh_and_run(config, credentials)
+    print("Processing linux hosts complete.") 
 
-    print("Processing complete.") 
-
-    # Delete duplicate connections from the database
-    print("Deleting duplicate connections...")
-    db_manager.delete_duplicate_connections()
-    print("Duplicate connections deleted.")
-
-
-    # Generate Mermaid diagram code based on the connections
-    connections = db_manager.fetch_connections()
-    mermaid_code = graphs_lib.generate_mermaid_code(connections)
-
-    # Output the Mermaid code to a Markdown file
-    graphs_lib.output_to_markdown(mermaid_code)
-    print("Mermaid diagram generation complete.")
+    #Remove duplicates from DB and generate mermaid code
+    cleanup()
 
 if __name__ == '__main__':
     subnet_arg = sys.argv[1] if len(sys.argv) == 2 else None
