@@ -1,15 +1,16 @@
 import os
 import sys
-import re
-import sqlite3
+import logging
 import nmap
 from datetime import datetime, timedelta
 import paramiko
 import yaml
-import logging
-from datetime import datetime
+import sqlite3
 import argparse
 import socket
+
+### helper files import
+import db_manager
 
 # Setup command-line argument parsing
 
@@ -35,49 +36,12 @@ error_logger.addHandler(error_handler)
 error_logger.setLevel(logging.ERROR)
 
 
-DB_PATH = 'network_dependencies.db'  # Path to your SQLite database
-
-CREATE_HOSTS_TABLE = """
-CREATE TABLE IF NOT EXISTS hosts (
-    id INTEGER PRIMARY KEY,
-    ip_address TEXT UNIQUE,
-    host_type TEXT,
-    host_class TEXT,
-    last_discovery TIMESTAMP
-);
-"""
-
-CREATE_NETSTAT_TABLE = """
-CREATE TABLE IF NOT EXISTS netstat_output (
-    id INTEGER PRIMARY KEY,
-    host_id INTEGER,
-    remote_host TEXT,
-    remote_port INTEGER,
-    connection_type TEXT,
-    local_port INTEGER,
-    FOREIGN KEY (host_id) REFERENCES hosts(id),
-    UNIQUE(host_id, remote_host, remote_port)  -- Ensure this UNIQUE constraint is defined
-);
-
-
-"""
-
-
-
 
 def load_config(config_path='config.yaml'):
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
     return config
 
-
-def setup_database():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(CREATE_HOSTS_TABLE)
-    cur.execute(CREATE_NETSTAT_TABLE)  # Create the netstat_output table
-    conn.commit()
-    conn.close()
 
 
 def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
@@ -120,60 +84,6 @@ def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
 
 # Note: Make sure to replace 'default_username' and 'default_password' with actual default SSH credentials or handle them according to your security policies.
 
-
-
-
-def populate_hosts(hosts):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    processed_hosts = []
-
-    for ip_address, os_type, host_class in hosts:
-        try:
-            last_discovery = datetime.now().isoformat()
-            cur.execute("""INSERT INTO hosts (ip_address, host_type, host_class, last_discovery)
-                           VALUES (?, ?, ?, ?)
-                           ON CONFLICT(ip_address)
-                           DO UPDATE SET host_type = excluded.host_type,
-                                         host_class = excluded.host_class,
-                                         last_discovery = excluded.last_discovery;""",
-                        (ip_address, os_type, host_class, last_discovery))
-            processed_hosts.append(ip_address)
-            session_logger.info(f"Processed host: {ip_address}")
-        except Exception as e:
-            error_logger.error(f"Failed to process host {ip_address}: {e}")
-
-    conn.commit()
-    conn.close()
-    return processed_hosts
-
-
-
-def get_recent_hosts(days=2):
-    recent_threshold = datetime.now() - timedelta(days=days)
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    cur.execute("""SELECT ip_address, host_type, host_class FROM hosts
-                   WHERE last_discovery >= ?""", (recent_threshold.isoformat(),))
-    recent_hosts = cur.fetchall()
-
-    conn.close()
-    return recent_hosts
-
-
-def get_host_last_discovery(ip_address):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT last_discovery FROM hosts WHERE ip_address = ?", (ip_address,))
-    row = cur.fetchone()
-    conn.close()
-    
-    if row:
-        # Parse ISO 8601 string back into a datetime object
-        last_discovery = datetime.fromisoformat(row[0])
-        return last_discovery
-    return None
 
 
 def load_known_host_credentials(credentials_path='known_hosts_credentials.txt'):
@@ -233,8 +143,6 @@ def parse_netstat_output(netstat_output):
     return parsed_data
 
 
-
-
 def extract_open_ports(netstat_output):
     open_ports = set()
     for line in netstat_output.splitlines():
@@ -247,25 +155,6 @@ def extract_open_ports(netstat_output):
             open_ports.add(local_port)
 
     return open_ports
-
-
-
-def update_netstat_output(host_id, netstat_data):
-    if netstat_data is None:
-        netstat_data = []  # Initialize to an empty list if None
-        print("netstat_data is None")  # Or use logging
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    for remote_ip, remote_port, connection_type, local_port in netstat_data:
-        # Use ON CONFLICT DO NOTHING to ignore attempts to insert duplicates
-        cur.execute("""INSERT INTO netstat_output (host_id, remote_host, remote_port, connection_type, local_port)
-                       VALUES (?, ?, ?, ?, ?)
-                       ON CONFLICT(host_id, remote_host, remote_port) DO NOTHING""",
-                    (host_id, remote_ip, remote_port, connection_type, local_port))
-    conn.commit()
-    conn.close()
 
 
 def is_port_open(ip_address, port=22, timeout=3):
@@ -336,15 +225,13 @@ def process_linux_hosts():
             stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
             command_output = stdout.read().decode('utf-8')
             netstat_output = parse_netstat_output(command_output)
-            update_netstat_output(host_id, netstat_output)
+            db_manager.update_netstat_output(host_id, netstat_output)
             all_netstat_outputs.append(netstat_output)  # Append the output for this host
 
         ssh.close()
 
     conn.close()
     return all_netstat_outputs  # Return the collected outputs after processing all hosts
-
-
 
 
 def ssh_run_command(host_ip, username, password, command="hostname"):
@@ -375,64 +262,6 @@ def ssh_run_command(host_ip, username, password, command="hostname"):
         print(f"SSH session closed for {host_ip}.")  # Added console output
 
 
-def delete_duplicate_connections():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    # Select and log incoming connections to be deleted
-    cur.execute("""SELECT id, host_id, remote_host, local_port, remote_port, connection_type FROM netstat_output
-                   WHERE (id NOT IN (
-                       SELECT MIN(id)
-                       FROM netstat_output
-                       WHERE connection_type = 'incoming'
-                       GROUP BY host_id, remote_host, local_port
-                   ) OR remote_port = '*') AND connection_type = 'incoming'""")
-    for row in cur.fetchall():
-        print(f"Deleting incoming duplicate or invalid connection: HostID={row[1]}, RemoteHost={row[2]}, LocalPort={row[3]}, RemotePort={row[4]}, Type={row[5]}")
-
-    # Actual deletion for incoming duplicates or invalid entries
-    cur.execute("""DELETE FROM netstat_output
-                   WHERE (id NOT IN (
-                       SELECT MIN(id)
-                       FROM netstat_output
-                       WHERE connection_type = 'incoming'
-                       GROUP BY host_id, remote_host, local_port
-                   ) OR remote_port = '*') AND connection_type = 'incoming'""")
-
-    # Select and log outgoing connections to be deleted
-    cur.execute("""SELECT id, host_id, remote_host, local_port, remote_port, connection_type FROM netstat_output
-                   WHERE (id NOT IN (
-                       SELECT MIN(id)
-                       FROM netstat_output
-                       WHERE connection_type = 'outgoing'
-                       GROUP BY host_id, remote_host, remote_port
-                   ) OR remote_port = '*') AND connection_type = 'outgoing'""")
-    for row in cur.fetchall():
-        print(f"Deleting outgoing duplicate or invalid connection: HostID={row[1]}, RemoteHost={row[2]}, LocalPort={row[3]}, RemotePort={row[4]}, Type={row[5]}")
-
-    # Actual deletion for outgoing duplicates or invalid entries
-    cur.execute("""DELETE FROM netstat_output
-                   WHERE (id NOT IN (
-                       SELECT MIN(id)
-                       FROM netstat_output
-                       WHERE connection_type = 'outgoing'
-                       GROUP BY host_id, remote_host, remote_port
-                   ) OR remote_port = '*') AND connection_type = 'outgoing'""")
-
-    conn.commit()
-    conn.close()
-
-
-def fetch_connections():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""SELECT n.host_id, h.ip_address AS host_ip, n.remote_host, n.local_port, n.remote_port, n.connection_type
-                   FROM netstat_output n
-                   JOIN hosts h ON n.host_id = h.id""")
-    connections = cur.fetchall()
-    conn.close()
-    return connections
-
 
 
 def generate_mermaid_code(connections):
@@ -448,8 +277,6 @@ def generate_mermaid_code(connections):
         mermaid_code += f"    {connection_line}\n"
 
     return mermaid_code
-
-
 
 
 def output_to_markdown(mermaid_code):
@@ -474,7 +301,7 @@ def main(subnet=None):
     config = load_config()
     global DB_PATH
     DB_PATH = config['database']['path']
-    setup_database()
+    db_manager.setup_database()
 
     excluded_hosts = set(args.exclude)  # Initialize excluded_hosts with values from --exclude
 
@@ -494,11 +321,11 @@ def main(subnet=None):
     for subnet in subnets_to_scan:
         print(f"Scanning subnet: {subnet}")
         discovered_hosts_info = scan_subnet(subnet, config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100"), excluded_hosts=excluded_hosts)
-        populate_hosts(discovered_hosts_info)
+        db_manager.populate_hosts(discovered_hosts_info)
 
     # Fetch recent hosts to avoid rescanning, if no specific subnet is provided
     if not subnet:
-        recent_hosts = get_recent_hosts()
+        recent_hosts = db_manager.get_recent_hosts()
         if recent_hosts:
             print(f"Using {len(recent_hosts)} recently discovered hosts from the database.")
             for host in recent_hosts:
@@ -515,12 +342,12 @@ def main(subnet=None):
 
     # Delete duplicate connections from the database
     print("Deleting duplicate connections...")
-    delete_duplicate_connections()
+    db_manager.delete_duplicate_connections()
     print("Duplicate connections deleted.")
 
 
     # Generate Mermaid diagram code based on the connections
-    connections = fetch_connections()
+    connections = db_manager.fetch_connections()
     mermaid_code = generate_mermaid_code(connections)
 
     # Output the Mermaid code to a Markdown file
