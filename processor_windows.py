@@ -10,8 +10,8 @@ def load_known_host_credentials(filename):
     return credentials
 
 def run_winrm_command(host, username, password, command):
-    print(f"Attempting to connect to {host} with user {username}")
-    session = winrm.Session(f'http://{host}:5985/wsman', auth=(username, password))
+    print(f"Attempting to connect to {host} with user {username} and {password}")
+    session = winrm.Session(f'http://{host}:5985/wsman', auth=(username, password), transport='ntlm')
     result = session.run_ps(command)
     print(f"Command executed on {host}, checking for errors...")
     if result.std_err:
@@ -56,6 +56,7 @@ def process_windows_hosts(ip_address, credentials_file='known_hosts_credentials.
         parsed_output = parse_windows_netstat_output(netstat_output)
         # Further processing...
         print(f"Processed {len(parsed_output)} connections for host {ip_address}")
+        print(f"{parsed_output}")
     else:
         print(f"No credentials found for host {ip_address}.")
 

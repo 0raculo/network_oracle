@@ -84,56 +84,6 @@ def ssh_and_run(config, credentials):
 
     return all_netstat_outputs  # Return the collected outputs after processing all hosts
 
-    config = load_config()  # Load the configuration
-    credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])
-    linux_hosts = db_manager.get_linux_hosts(config['database']['path'])
-
-    print(f"Found {len(linux_hosts)} linux hosts in the database. Processing...")
-
-    all_netstat_outputs = []  # Collect netstat outputs for all hosts
-
-    for host_id, ip_address in linux_hosts:
-        if not is_port_open(ip_address):
-            print(f"Port 22 is closed on {ip_address}. Bypassing this host.")
-            continue  # Skip to the next host
-
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh_key_success = False
-
-        for username in config['credentials']['ssh_usernames']:
-            try:
-                pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
-                ssh.connect(ip_address, username=username, pkey=pkey)
-                print(f"SSH key login successful for: {ip_address} with username: {username}")
-                ssh_key_success = True
-                break  # Exit the username loop on successful connection
-            except paramiko.ssh_exception.AuthenticationException:
-                print(f"SSH key login failed for: {ip_address} with username: {username}")
-
-        if not ssh_key_success and ip_address in credentials:
-            cred = credentials[ip_address]
-            # Attempt password login if SSH key authentication fails
-            for username, password in credentials.items():
-                try:
-                    ssh.connect(ip_address, username=cred['username'], password=cred['password'])
-                    print(f"Password login successful for: {ip_address} with username: {cred['username']}")
-                    ssh_key_success = True
-                    break  # Exit the credentials loop on successful connection
-                except paramiko.ssh_exception.AuthenticationException:
-                    print(f"Password login failed for: {ip_address} with username: {cred['username']}")
-
-        if ssh_key_success:
-            # SSH operations like ssh_run_netstat
-            stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
-            command_output = stdout.read().decode('utf-8')
-            netstat_output = parse_linux_netstat_output(command_output)
-            db_manager.update_netstat_output(host_id, netstat_output)
-            all_netstat_outputs.append(netstat_output)  # Append the output for this host
-
-        ssh.close()
-
-    return all_netstat_outputs  # Return the collected outputs after processing all hosts
 
 def parse_linux_netstat_output(netstat_output):
     listening_ports = []  # To store ports on which the machine is listening
