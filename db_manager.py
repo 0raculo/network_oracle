@@ -165,7 +165,7 @@ def fetch_connections():
     return connections
 
 
-def get_linux_hosts(db_path):
+def get_all_os_hosts(db_path, os):
     """Fetches Linux hosts from the database.
 
     Args:
@@ -177,7 +177,7 @@ def get_linux_hosts(db_path):
     conn = sqlite3.connect(db_path)
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, ip_address FROM hosts WHERE host_class='linux'")
+        cur.execute("SELECT id, ip_address FROM hosts WHERE host_class=?", (os,))
         linux_hosts = cur.fetchall()
         return linux_hosts
     finally:

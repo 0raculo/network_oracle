@@ -11,6 +11,7 @@ import socket
 ### helper files import
 import db_manager
 import processor_linux
+import processor_windows
 import graphs_lib
 from logger_config import setup_logging
 
@@ -29,7 +30,7 @@ def load_known_host_credentials(credentials_path='known_hosts_credentials.txt'):
             credentials[ip_address] = {'username': username, 'password': password}
     return credentials
 
-def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
+def scan_subnet(subnet, scan_arguments="-sn -n -PS22,5985", excluded_hosts=None):
     scanner = nmap.PortScanner()
     print(f"Starting nmap scan on subnet: {subnet} with arguments: {scan_arguments}")
     scanner.scan(hosts=subnet, arguments=scan_arguments)
@@ -51,17 +52,20 @@ def scan_subnet(subnet, scan_arguments="-sn", excluded_hosts=None):
         try:
             print(f"Attempting to detect SSH banner on {host}")
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(5)
+                sock.settimeout(1)
                 sock.connect((host, 22))
                 banner = sock.recv(1024).decode('utf-8', 'ignore')
                 if 'SSH' in banner:
                     print(f"SSH banner detected on {host}")
                     host_class = 'linux'  # SSH banner present, classify as Linux
                 else:
-                    print(f"No SSH banner detected on {host}")
+                    print(f"No SSH banner detected on {host}.")
         except Exception as e:
-            print(f"Failed to detect SSH banner on {host}: {e}")
-
+            print(f"Failed to detect SSH banner on {host}: {e}. Let's see if it's a windows host using winrm!")
+            if processor_windows.attempt_winrm_connection(host):
+                        print(f"WinRM detected on {host}")
+                        host_class = 'windows'  # WinRM connection successful, classify as Windows
+                        # If not might be an iot device. Keep it as other.
         host_details.append((host, os_type, host_class))
 
     return host_details
@@ -112,7 +116,6 @@ def main(subnet=None):
         print(f"Scanning subnet: {subnet}")
         discovered_hosts_info = scan_subnet(subnet, config.get('nmap', {}).get('scan_arguments', "-O --top-ports 100"), excluded_hosts=excluded_hosts)
         db_manager.populate_hosts(discovered_hosts_info)
-
 
     # Process linux hosts  with the loaded config and credentials
     print("Processing linux hosts...")

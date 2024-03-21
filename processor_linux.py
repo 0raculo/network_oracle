@@ -36,7 +36,7 @@ def ssh_run_command(host_ip, username, password, command="hostname"):
         print(f"SSH session closed for {host_ip}.")  # Added console output
 
 def ssh_and_run(config, credentials):
-    linux_hosts = db_manager.get_linux_hosts(config['database']['path'])
+    linux_hosts = db_manager.get_all_os_hosts(config['database']['path'], "linux")
 
     print(f"Found {len(linux_hosts)} linux hosts in the database. Processing...")
 

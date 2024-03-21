@@ -9,6 +9,36 @@ def load_known_host_credentials(filename):
             credentials[host] = {'username': username, 'password': password}
     return credentials
 
+def attempt_winrm_connection(host):
+    # Use a non-existent username and password to trigger an authentication failure
+    fake_credentials = {'username': 'fakeuser', 'password': 'fakepassword'}
+
+    try:
+        session = winrm.Session(f'http://{host}:5985/wsman', auth=(fake_credentials['username'], fake_credentials['password']), transport='ntlm')
+        # Run a simple command that would succeed if authenticated
+        result = session.run_ps('echo test')
+
+        # Analyze the response
+        if result.status_code == 0:
+            # This case is unlikely with fake credentials but indicates WinRM is active
+            return True
+        else:
+            # If we receive a specific error related to authentication, WinRM is active but we used wrong credentials
+            print(f"Authentication failure with WinRM on {host}, indicating WinRM service is active.")
+            return True
+    except winrm.exceptions.WinRMTransportError as e:
+        # This likely indicates a network-level error such as a timeout or closed port
+        print(f"WinRM transport error on {host}: {str(e)}")
+        return False
+    except winrm.exceptions.InvalidCredentialsError as e:
+        # This indicates that the credentials were rejected, implying WinRM is active
+        print(f"Invalid credentials error on {host}, indicating WinRM service is active.")
+        return True
+    except Exception as e:
+        # Catch-all for any other exceptions
+        print(f"WinRM connection to {host} failed with an unexpected error: {str(e)}")
+        return False
+
 def run_winrm_command(host, username, password, command):
     print(f"Attempting to connect to {host} with user {username} and {password}")
     session = winrm.Session(f'http://{host}:5985/wsman', auth=(username, password), transport='ntlm')
@@ -17,6 +47,7 @@ def run_winrm_command(host, username, password, command):
     if result.std_err:
         print(f"Error executing command on {host}: {result.std_err.decode('utf-8')}")
     return result.std_out.decode('utf-8'), result.std_err.decode('utf-8')
+
 
 def parse_windows_netstat_output(netstat_output):
     print("Parsing netstat output...")
