@@ -76,9 +76,9 @@ def ssh_and_run(config, credentials):
             # SSH operations like ssh_run_netstat
             stdin, stdout, stderr = ssh.exec_command('netstat -tunap')
             command_output = stdout.read().decode('utf-8')
-            netstat_output = parse_linux_netstat_output(command_output)
-            db_manager.update_netstat_output(host_id, netstat_output)
-            all_netstat_outputs.append(netstat_output)  # Append the output for this host
+            parsed_output = parse_linux_netstat_output(command_output)
+            db_manager.update_netstat_output(host_id, parsed_output)
+            all_netstat_outputs.append(parsed_output)  # Append the output for this host
 
         ssh.close()
 

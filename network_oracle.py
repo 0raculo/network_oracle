@@ -48,7 +48,8 @@ def scan_subnet(subnet, scan_arguments="-sn -n -PS22,5985", excluded_hosts=None)
         os_type = 'unknown'
         host_class = 'other'  # Default classification
 
-        # Attempt to detect SSH banner
+        # Attempt to detect SSH banner or WinRM connection to check if Windows or Linux Host
+        # Then, we can update db accordingly
         try:
             print(f"Attempting to detect SSH banner on {host}")
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -122,7 +123,9 @@ def main(subnet=None):
     config = load_config()  # Your function to load the configuration
     credentials = load_known_host_credentials(config['credentials']['known_hosts_file'])  # Your function to load credentials
     all_netstat_outputs = processor_linux.ssh_and_run(config, credentials)
-    print("Processing linux hosts complete.") 
+    print("Processing linux hosts complete. Processing Windows hosts") 
+    processor_windows.process_windows_hosts(config, credentials)
+    print("Processing windows hosts...")
 
     #Remove duplicates from DB and generate mermaid code
     cleanup()
