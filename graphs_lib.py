@@ -19,7 +19,5 @@ def output_to_markdown(mermaid_code):
     date_str = datetime.now().strftime("%Y%m%d")
     filename = f"diagram_{date_str}.md"
     with open(filename, 'w') as file:
-        file.write("```mermaid\n")
         file.write(mermaid_code)
-        file.write("```\n")
     print(f"Mermaid diagram code written to {filename}")
