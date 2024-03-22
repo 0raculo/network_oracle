@@ -1,6 +1,7 @@
 import winrm
 import re
 import db_manager
+import requests
 from logger_config import setup_logging
 
 session_logger, error_logger, debug_logger = setup_logging()
@@ -101,26 +102,31 @@ def process_windows_hosts(config, credentials):
     all_netstat_outputs = []  # To collect netstat outputs for all hosts
 
     for host_id, ip_address in windows_hosts:
-        # Check if the current host's credentials are available
         if ip_address in credentials:
             cred = credentials[ip_address]
-            # Attempt to connect and run the command using WinRM
-            netstat_output, error = run_winrm_command(ip_address, cred['username'], cred['password'], 'netstat -ano')
-            debug_logger.debug("debug netstat_output output: " + netstat_output)
-            if error:
-                print(f"Skipping host {ip_address} due to error.")
-                continue  # Skip to the next host if there's an error
 
-            # Parse the netstat output
-            parsed_output = parse_windows_netstat_output(netstat_output)
-            debug_logger.debug("debug parsed output: " + str(parsed_output))
-            db_manager.update_netstat_output(host_id, parsed_output)
-            # Store the parsed data for the current host
-            all_netstat_outputs.append(parsed_output)
+            try:
+                # Attempt to connect and run the command using WinRM
+                netstat_output, error = run_winrm_command(ip_address, cred['username'], cred['password'], 'netstat -ano')
+                if error:
+                    raise Exception(f"WinRM command error: {error}")
 
-            print(f"Processed {len(parsed_output)} connections for host {ip_address}")
+                # Parse the netstat output
+                parsed_output = parse_windows_netstat_output(netstat_output)
+                db_manager.update_netstat_output(host_id, parsed_output)
+                all_netstat_outputs.append(parsed_output)
+                print(f"Processed {len(parsed_output)} connections for host {ip_address}")
+
+            except requests.exceptions.HTTPError as e:
+                print(f"HTTP Error for host {ip_address}: {e}")
+                error_logger.error(f"HTTP Error for host {ip_address}: {e}")
+            except Exception as e:
+                print(f"Skipping host {ip_address} due to error: {e}")
+                error_logger.error(f"Skipping host {ip_address} due to error: {e}")
+
         else:
             print(f"No credentials found for Windows host {ip_address}, skipping.")
+
 
     return all_netstat_outputs  # Return the collected outputs after processing all hosts
 
