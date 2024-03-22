@@ -13,7 +13,7 @@ def ssh_run_command(host_ip, username, password, command="hostname"):
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     try:
-        ssh.connect(host_ip, username=username, password=password)
+        ssh.connect(host_ip, username=username, password=password, allow_agent=False,look_for_keys=False)
         print(f"Connected to {host_ip}. Executing command...")  # Added console output
         stdin, stdout, stderr = ssh.exec_command(command)
         command_output = stdout.read().decode('utf-8').strip()
@@ -27,6 +27,10 @@ def ssh_run_command(host_ip, username, password, command="hostname"):
         error_logger.error(f"Authentication failed for host {host_ip}.", exc_info=True)
         print(f"Authentication failed for host {host_ip}.")  # Added console output
 
+    except paramiko.SSHException as e:
+        error_logger.error(f"SSHException for host {host_ip}: {e}", exc_info=True)
+        print(f"SSHException encountered with host {host_ip}. Skipping this host and continuing.")
+        
     except Exception as e:
         error_logger.error(f"SSH connection or command execution failed for host {host_ip}: {e}", exc_info=True)
         print(f"SSH connection or command execution failed for host {host_ip}.")  # Added console output
@@ -55,7 +59,7 @@ def ssh_and_run(config, credentials):
         for username in config['credentials']['ssh_usernames']:
             try:
                 pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
-                ssh.connect(ip_address, username=username, pkey=pkey)
+                ssh.connect(ip_address, username=username, pkey=pkey, allow_agent=False,look_for_keys=False)
                 print(f"SSH key login successful for: {ip_address} with username: {username}")
                 ssh_key_success = True
                 break  # Exit the username loop on successful connection

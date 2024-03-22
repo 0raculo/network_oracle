@@ -2,7 +2,7 @@ database:
   path: 'network_dependencies.db'
 
 nmap:
-  scan_arguments: "-n -PS22,5985 -sn"
+  scan_arguments: "-v -n -p 22,5985"
 
 web_server:
   host: '127.0.0.1'
@@ -13,25 +13,12 @@ credentials:
   known_hosts_file: 'known_hosts_credentials.txt'
   generic_credentials_file: 'generic_credentials.txt'
   ssh_private_key: 'id_rsa'
-  ssh_usernames: ['afonso.duarte', 'root']
+  ssh_usernames: ['afonso.duarte']
 
 network_scan:
   subnets:
     - '192.168.1.0/24'
-    - '192.168.3.0/24'
-    - '192.168.6.0/24'
-    - '10.129.30.0/24'
-    - '10.129.31.0/24'
-    - '10.129.32.0/24'
-    - '10.129.40.0/24'
-    - '10.129.41.0/24'
-    - '10.129.42.0/24'
-    - '10.129.50.0/24'
-    - '10.129.51.0/24'
-    - '10.129.52.0/24'
-    - '10.129.60.0/24'
-    - '10.129.61.0/24'
-    - '10.129.62.0/24'
+
 
 logging:
   directory: 'logs'

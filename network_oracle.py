@@ -30,16 +30,35 @@ def load_known_host_credentials(credentials_path='known_hosts_credentials.txt'):
             credentials[ip_address] = {'username': username, 'password': password}
     return credentials
 
-def scan_subnet(subnet, scan_arguments="-sn -n -PS22,5985", excluded_hosts=None):
-    scanner = nmap.PortScanner()
+def scan_for_open_ports(subnet, nmap_arguments):
+    nm = nmap.PortScanner()
+    open_hosts = []
+
+    nm.scan(hosts=subnet, arguments=nmap_arguments)
+
+    for host in nm.all_hosts():
+        # Check if the host has open ports specified in the scan arguments
+        for proto in nm[host].all_protocols():
+            for port in nm[host][proto]:
+                port_info = nm[host][proto][port]
+                # Check if the port is open and add the host to the list
+                if port_info['state'] == 'open':
+                    open_hosts.append(host)
+                    break  # Exit the loop after finding the first open port for the host
+    
+    print(f"Debug - Total open hosts found: {len(open_hosts)}")
+
+    return open_hosts
+
+def scan_subnet(subnet, scan_arguments, excluded_hosts=None):
     print(f"Starting nmap scan on subnet: {subnet} with arguments: {scan_arguments}")
-    scanner.scan(hosts=subnet, arguments=scan_arguments)
+    open_hosts = scan_for_open_ports(subnet, scan_arguments)
     host_details = []
 
     if excluded_hosts is None:
         excluded_hosts = set()
 
-    for host in scanner.all_hosts():
+    for host in open_hosts:
         if host in excluded_hosts:
             print(f"Skipping excluded host: {host}")
             continue  # Skip this host and move on to the next one
