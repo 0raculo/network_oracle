@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 from logger_config import setup_logging
 
-session_logger, error_logger = setup_logging()
+session_logger, error_logger, debug_logger = setup_logging()
 
 DB_PATH = 'network_dependencies.db'  # Path to your SQLite database
 

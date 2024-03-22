@@ -1,9 +1,6 @@
-import os
 import sys
 import logging
 import nmap
-from datetime import datetime
-import paramiko
 import yaml
 import argparse
 import socket
@@ -15,7 +12,7 @@ import processor_windows
 import graphs_lib
 from logger_config import setup_logging
 
-session_logger, error_logger = setup_logging()
+session_logger, error_logger, debug_logger = setup_logging()
 
 def load_config(config_path='config.yaml'):
     with open(config_path, 'r') as file:

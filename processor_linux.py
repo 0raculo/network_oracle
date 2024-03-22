@@ -3,41 +3,8 @@ import socket
 import db_manager
 from logger_config import setup_logging
 
-session_logger, error_logger = setup_logging()
+session_logger, error_logger, debug_logger = setup_logging()
 
-def ssh_run_command(host_ip, username, password, command="hostname"):
-    '''
-    Unused. Runs arbitrary command on a linux host.
-        '''
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    try:
-        ssh.connect(host_ip, username=username, password=password, allow_agent=False,look_for_keys=False)
-        print(f"Connected to {host_ip}. Executing command...")  # Added console output
-        stdin, stdout, stderr = ssh.exec_command(command)
-        command_output = stdout.read().decode('utf-8').strip()
-        command_error = stderr.read().decode('utf-8')
-
-        session_logger.info(f"Hostname for {host_ip}: {command_output}")
-        if command_error:
-            error_logger.error(f"Error when getting hostname for {host_ip}: {command_error}")
-
-    except paramiko.AuthenticationException:
-        error_logger.error(f"Authentication failed for host {host_ip}.", exc_info=True)
-        print(f"Authentication failed for host {host_ip}.")  # Added console output
-
-    except paramiko.SSHException as e:
-        error_logger.error(f"SSHException for host {host_ip}: {e}", exc_info=True)
-        print(f"SSHException encountered with host {host_ip}. Skipping this host and continuing.")
-        
-    except Exception as e:
-        error_logger.error(f"SSH connection or command execution failed for host {host_ip}: {e}", exc_info=True)
-        print(f"SSH connection or command execution failed for host {host_ip}.")  # Added console output
-
-    finally:
-        ssh.close()
-        print(f"SSH session closed for {host_ip}.")  # Added console output
 
 def ssh_and_run(config, credentials):
     linux_hosts = db_manager.get_all_os_hosts(config['database']['path'], "linux")
@@ -48,7 +15,7 @@ def ssh_and_run(config, credentials):
 
     for host_id, ip_address in linux_hosts:
         if not is_port_open(ip_address):
-            print(f"Port 22 is closed on {ip_address}. Bypassing this host.")
+            session_logger.info(f"Port 22 is closed on {ip_address}. Bypassing this host.")
             continue  # Skip to the next host
 
         # Use the provided credentials and config to establish an SSH connection
@@ -60,21 +27,23 @@ def ssh_and_run(config, credentials):
             try:
                 pkey = paramiko.RSAKey.from_private_key_file(config['credentials']['ssh_private_key'])
                 ssh.connect(ip_address, username=username, pkey=pkey, allow_agent=False,look_for_keys=False)
-                print(f"SSH key login successful for: {ip_address} with username: {username}")
+                session_logger.info(f"SSH key login successful for: {ip_address} with username: {username}")
                 ssh_key_success = True
                 break  # Exit the username loop on successful connection
             except paramiko.ssh_exception.AuthenticationException:
                 print(f"SSH key login failed for: {ip_address} with username: {username}")
+                session_logger.error(f"SSH key login failed for: {ip_address} with username: {username}")
 
         if not ssh_key_success and ip_address in credentials:
             cred = credentials[ip_address]
             # Attempt password login if SSH key authentication fails
             try:
                 ssh.connect(ip_address, username=cred['username'], password=cred['password'])
-                print(f"Password login successful for: {ip_address} with username: {cred['username']}")
+                session_logger.info(f"Password login successful for: {ip_address} with username: {cred['username']}")
                 ssh_key_success = True
             except paramiko.ssh_exception.AuthenticationException:
                 print(f"Password login failed for: {ip_address} with username: {cred['username']}")
+                session_logger.error(f"Password login failed for: {ip_address} with username: {cred['username']}")
 
         if ssh_key_success:
             # SSH operations like ssh_run_netstat
@@ -92,7 +61,7 @@ def ssh_and_run(config, credentials):
 def parse_linux_netstat_output(netstat_output):
     listening_ports = []  # To store ports on which the machine is listening
     parsed_data = []  # To store parsed netstat entries
-
+    debug_logger.debug(netstat_output)
     # First pass to find listening ports
     for line in netstat_output.splitlines():
         parts = line.split()
